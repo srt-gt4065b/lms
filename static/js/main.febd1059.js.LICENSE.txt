@@ -5,6 +5,10 @@ https://github.com/mholt/PapaParse
 License: MIT
 */
 
+/*! sheetjs (C) 2013-present SheetJS -- http://sheetjs.com */
+
+/*! xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */
+
 /**
           * @license
           * Copyright 2017 Google LLC
