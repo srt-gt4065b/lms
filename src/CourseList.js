@@ -1,185 +1,306 @@
-// src/CourseList.js
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc, updateDoc, arrayUnion, arrayRemove, query, orderBy } from 'firebase/firestore';
 import { db } from './firebase';
 
 const CourseList = () => {
   const [lectures, setLectures] = useState([]);
-  const [filteredLectures, setFilteredLectures] = useState([]); 
-  const [myName, setMyName] = useState(""); 
-  const [filterLang, setFilterLang] = useState("전체"); 
-  const [modalContent, setModalContent] = useState(null);
+  const [myId, setMyId] = useState(""); 
+  const [professors, setProfessors] = useState([]); 
 
-  // ★ 중요: 이제 교수님 목록도 DB에서 가져옵니다 (빈 배열로 시작)
-  const [professors, setProfessors] = useState([]);
+  // --- 필터 상태 ---
+  const [selectedLang, setSelectedLang] = useState("ALL"); // 강의 언어 필터
+  const [selectedDept, setSelectedDept] = useState("ALL"); // 학과 필터
+  
+  // --- UI 언어 상태 (기본값: 한국어) ---
+  const [uiLang, setUiLang] = useState("KO"); // KO, EN, CN
+
+  // 🌐 다국어 사전 (Interface Translations)
+  const t = {
+    KO: {
+      title: "2026-1학기 강의 희망 신청",
+      profName: "교수님 성함",
+      selectPlace: "-- 선택하세요 --",
+      filterDept: "학과 필터",
+      filterLang: "강의 언어 필터",
+      all: "전체",
+      korean: "한국어",
+      english: "영어",
+      chinese: "중국어",
+      grade: "학년",
+      credit: "학점",
+      est: "예상",
+      students: "명",
+      noDesc: "강의 설명이 없습니다.",
+      section: "분반",
+      applicant: "신청자",
+      cancel: "취소 X",
+      apply: "+ 신청",
+      noResult: "조건에 맞는 강의가 없습니다. 😅",
+      alertNoName: "먼저 상단에서 본인의 이름을 선택해주세요!",
+      unknown: "미정"
+    },
+    EN: {
+      title: "Course Application Spring 2026",
+      profName: "Professor Name",
+      selectPlace: "-- Select Name --",
+      filterDept: "Department Filter",
+      filterLang: "Instruction Language",
+      all: "All",
+      korean: "Korean",
+      english: "English",
+      chinese: "Chinese",
+      grade: "Year",
+      credit: "Credits",
+      est: "Est.",
+      students: "students",
+      noDesc: "No description available.",
+      section: "Sec",
+      applicant: "Applicants",
+      cancel: "Cancel X",
+      apply: "+ Apply",
+      noResult: "No courses found matching your criteria. 😅",
+      alertNoName: "Please select your name at the top first!",
+      unknown: "TBD"
+    },
+    CN: {
+      title: "2026年春季学期 授课申请",
+      profName: "教授姓名",
+      selectPlace: "-- 请选择 --",
+      filterDept: "学科筛选",
+      filterLang: "授课语言",
+      all: "全部",
+      korean: "韩语",
+      english: "英语",
+      chinese: "中文",
+      grade: "年级",
+      credit: "学分",
+      est: "预计",
+      students: "人",
+      noDesc: "暂无课程说明。",
+      section: "分班",
+      applicant: "申请人",
+      cancel: "取消 X",
+      apply: "+ 申请",
+      noResult: "未找到符合条件的课程。 😅",
+      alertNoName: "请先在上方选择您的姓名！",
+      unknown: "未定"
+    }
+  };
+
+  const ui = t[uiLang]; // 현재 선택된 언어팩
 
   useEffect(() => {
-    // 1. 강의 목록 가져오기 (기존 코드)
-    const coursesRef = collection(db, "semesters", "2026_spring", "courses");
-    const unsubCourses = onSnapshot(coursesRef, (snapshot) => {
-      let expandedData = [];
-      snapshot.docs.forEach(doc => {
+    const q = query(collection(db, "semesters", "2026_spring", "courses"), orderBy("courseName"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const lectureData = snapshot.docs.map(doc => {
         const data = doc.data();
-        const totalSections = data.sectionInfo?.total || 1;
-        const langMap = data.languageMap || {}; 
-
-        for (let i = 1; i <= totalSections; i++) {
-          let currentLang = langMap[i.toString()] || "한국어";
-          let langColor = "#333";
-          if (currentLang === "중국어") langColor = "red";
-          else if (currentLang === "영어") langColor = "blue";
-          
-          expandedData.push({
-            uniqueKey: `${doc.id}_${i}`,
-            docId: doc.id,
-            sectionIndex: i,
-            grade: data.targetGrade,
-            name: data.courseName,
-            credit: `${data.credits} / ${data.hours}`,
-            estStudents: data.estStudents || "-", 
-            language: currentLang,
-            langColor: langColor,
-            prevProfessor: data.prevProfInfo?.name || "",
-            applicants: data.applicants?.[i.toString()] || [],
-            description: data.description || "등록된 강의 개요가 없습니다."
-          });
-        }
+        return {
+          id: doc.id,
+          ...data,
+          department: data.department || "Etc", 
+          languageMap: data.languageMap || {},
+          applicants: data.applicants || {}
+        };
       });
-      expandedData.sort((a, b) => a.grade.localeCompare(b.grade));
-      setLectures(expandedData); 
+      lectureData.sort((a, b) => 
+        a.department.localeCompare(b.department) || 
+        a.targetGrade.localeCompare(b.targetGrade) ||
+        a.courseName.localeCompare(b.courseName)
+      );
+      setLectures(lectureData);
     });
 
-    // 2. ★ 교수님 목록 가져오기 (추가된 코드)
     const profRef = collection(db, "professors");
-    const q = query(profRef, orderBy("name"));
-    const unsubProf = onSnapshot(q, (snapshot) => {
-      // DB에서 가져온 이름들로 목록 업데이트
-      const names = snapshot.docs.map(doc => doc.data().name);
-      setProfessors(names);
+    const qProf = query(profRef, orderBy("name"));
+    const unsubProf = onSnapshot(qProf, (snapshot) => {
+      setProfessors(snapshot.docs.map(d => d.data().name));
     });
 
     return () => {
-      unsubCourses();
+      unsubscribe();
       unsubProf();
     };
   }, []);
 
-  useEffect(() => {
-    if (filterLang === "전체") {
-      setFilteredLectures(lectures);
-    } else {
-      setFilteredLectures(lectures.filter(lec => lec.language === filterLang));
-    }
-  }, [lectures, filterLang]);
-
-  const handleToggleWish = async (docId, sectionIndex, currentApplicants) => {
-    if (!myName) {
-      alert("상단에서 본인 이름을 먼저 선택해주세요!");
-      return;
-    }
-    const lectureRef = doc(db, "semesters", "2026_spring", "courses", docId);
-    const fieldPath = `applicants.${sectionIndex}`;
-
-    try {
-      if (currentApplicants.includes(myName)) {
-        await updateDoc(lectureRef, { [fieldPath]: arrayRemove(myName) });
-      } else {
-        await updateDoc(lectureRef, { [fieldPath]: arrayUnion(myName) });
-      }
-    } catch (error) {
-      console.error("신청 실패:", error);
-      alert("오류 발생");
-    }
+  const handleApply = async (lectureId, section) => {
+    if (!myId) { alert(ui.alertNoName); return; }
+    const lectureRef = doc(db, "semesters", "2026_spring", "courses", lectureId);
+    await updateDoc(lectureRef, { [`applicants.${section}`]: arrayUnion(myId) });
   };
 
-  const stickyHeaderStyle = {
-    position: 'sticky', top: 0, backgroundColor: '#f5f5f5', zIndex: 100,
-    padding: '12px', borderBottom: '2px solid #333', color: '#444'
+  const handleCancel = async (lectureId, section) => {
+    if (!myId) return;
+    const lectureRef = doc(db, "semesters", "2026_spring", "courses", lectureId);
+    await updateDoc(lectureRef, { [`applicants.${section}`]: arrayRemove(myId) });
   };
+
+  const allDepartments = ["ALL", ...new Set(lectures.map(l => l.department))];
+
+  const filteredLectures = lectures.filter(lecture => {
+    const deptMatch = selectedDept === "ALL" || lecture.department === selectedDept;
+    
+    // DB에 저장된 언어값("한국어","영어" 등)을 필터링하기 위한 매핑
+    // selectedLang이 'ALL'이 아니면, 해당 분반 언어목록에 포함되는지 확인
+    const sectionLangs = Object.values(lecture.languageMap);
+    
+    // 필터 로직: 언어 필터가 'ALL'이면 통과, 아니면 해당 언어(예: "영어")가 포함된 분반이 있어야 함
+    let langMatch = true;
+    if (selectedLang !== "ALL") {
+       // selectedLang 값은 "한국어", "영어", "중국어" (아래 버튼 value 참조)
+       langMatch = sectionLangs.includes(selectedLang);
+    }
+
+    return deptMatch && langMatch;
+  });
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
-      <header style={{ marginBottom: '20px', padding: '20px', backgroundColor: '#e3f2fd', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0, color: '#1565c0' }}>🛒 2026-1학기 강의 희망 신청</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: 'white', padding: '8px 15px', borderRadius: '25px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-            <span style={{ fontWeight: 'bold' }}>👤 사용자: </span>
-            <select style={{ padding: '5px', border:'none', fontSize: '16px', outline:'none' }} value={myName} onChange={(e) => setMyName(e.target.value)}>
-              <option value="">-- 선택 --</option>
-              {professors.map(name => <option key={name} value={name}>{name}</option>)}
-            </select>
+    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'sans-serif' }}>
+      
+      {/* 1. 헤더 & 언어 설정 & 로그인 */}
+      <header style={{ borderBottom: '2px solid #eee', paddingBottom: '20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+          <h1 style={{ color: '#1565c0', margin: 0 }}>{ui.title}</h1>
+          
+          {/* 🌍 UI 언어 변경 버튼 */}
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <button onClick={() => setUiLang("KO")} style={{ opacity: uiLang==="KO"?1:0.5, cursor:'pointer', border:'none', background:'none', fontSize:'1.5rem' }}>🇰🇷</button>
+            <button onClick={() => setUiLang("EN")} style={{ opacity: uiLang==="EN"?1:0.5, cursor:'pointer', border:'none', background:'none', fontSize:'1.5rem' }}>🇺🇸</button>
+            <button onClick={() => setUiLang("CN")} style={{ opacity: uiLang==="CN"?1:0.5, cursor:'pointer', border:'none', background:'none', fontSize:'1.5rem' }}>🇨🇳</button>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontWeight: 'bold', color: '#555' }}>🌪️ 언어 필터:</span>
-          {["전체", "한국어", "영어", "중국어"].map(lang => (
-            <button key={lang} onClick={() => setFilterLang(lang)}
-              style={{ padding: '6px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontWeight: 'bold', backgroundColor: filterLang === lang ? '#1976d2' : 'white', color: filterLang === lang ? 'white' : '#555', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-              {lang}
-            </button>
-          ))}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'flex-end' }}>
+          <span style={{ fontWeight:'bold' }}>{ui.profName}: </span>
+          <select 
+            value={myId} 
+            onChange={(e) => setMyId(e.target.value)}
+            style={{ padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+          >
+            <option value="">{ui.selectPlace}</option>
+            {professors.map(name => <option key={name} value={name}>{name}</option>)}
+          </select>
         </div>
       </header>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px', fontSize: '14px' }}>
-        <thead>
-          <tr style={{ textAlign: 'center' }}>
-            <th style={stickyHeaderStyle}>학년</th>
-            <th style={{ ...stickyHeaderStyle, textAlign: 'left' }}>과목명 (개요보기)</th>
-            <th style={{ ...stickyHeaderStyle, width: '60px' }}>예상수</th>
-            <th style={{ ...stickyHeaderStyle, width: '50px' }}>분반</th>
-            <th style={{ ...stickyHeaderStyle, width: '80px' }}>언어</th>
-            <th style={{ ...stickyHeaderStyle, width: '100px' }}>기존 담당</th>
-            <th style={{ ...stickyHeaderStyle, textAlign: 'left' }}>희망 신청 (Click)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredLectures.map((lecture) => {
-            const isMyWish = lecture.applicants.includes(myName);
-            return (
-              <tr key={lecture.uniqueKey} style={{ borderBottom: '1px solid #ddd', textAlign: 'center', height: '55px', backgroundColor: isMyWish ? '#e8f5e9' : 'white' }}>
-                <td style={{ color: '#666' }}>{lecture.grade}</td>
-                <td 
-                  onClick={() => setModalContent({ title: lecture.name, desc: lecture.description })}
-                  style={{ fontWeight: 'bold', textAlign: 'left', paddingLeft: '10px', cursor: 'pointer' }}
-                >
-                    <span style={{ textDecoration: 'underline', textUnderlineOffset: '4px', textDecorationColor: '#bbb' }}>{lecture.name}</span>
-                    <span style={{fontSize: '0.8em', color: '#999', marginLeft:'5px', textDecoration: 'none'}}>({lecture.credit})</span>
-                </td>
-                <td style={{ color: '#555' }}>{lecture.estStudents}</td>
-                <td style={{ fontWeight: 'bold' }}>{lecture.sectionIndex}</td>
-                <td style={{ fontWeight: 'bold', color: lecture.langColor }}>{lecture.language}</td>
-                <td style={{ color: '#aaa', fontSize:'0.9em' }}>{lecture.prevProfessor || "-"}</td>
-                <td style={{ textAlign: 'left', paddingLeft: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <button 
-                      onClick={() => handleToggleWish(lecture.docId, lecture.sectionIndex, lecture.applicants)}
-                      style={{ padding: '6px 12px', cursor: 'pointer', backgroundColor: isMyWish ? '#ff5252' : '#fff', color: isMyWish ? 'white' : '#555', border: isMyWish ? 'none' : '1px solid #ccc', borderRadius: '20px', fontSize: '0.85em', fontWeight: 'bold' }}>
-                      {isMyWish ? "취소 X" : "+ 희망"}
-                    </button>
-                    {lecture.applicants.map(profName => (
-                      <span key={profName} style={{ backgroundColor: profName === myName ? '#4caf50' : '#eee', color: profName === myName ? 'white' : '#333', padding: '4px 10px', borderRadius: '15px', fontSize: '0.85em', fontWeight: 'bold' }}>{profName}</span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      {/* 2. 필터 컨트롤 영역 */}
+      <div style={{ backgroundColor: '#f5f5f5', padding: '15px', borderRadius: '8px', marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center' }}>
+        
+        {/* 학과 필터 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontWeight: 'bold', color: '#555' }}>🏫 {ui.filterDept}:</span>
+          <select 
+            value={selectedDept} 
+            onChange={(e) => setSelectedDept(e.target.value)}
+            style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '150px' }}
+          >
+            {allDepartments.map(dept => (
+              <option key={dept} value={dept}>{dept === "ALL" ? ui.all : dept}</option>
+            ))}
+          </select>
+        </div>
 
-      {modalContent && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setModalContent(null)}>
-          <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '10px', width: '80%', maxWidth: '600px', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', position: 'relative' }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, borderBottom: '2px solid #2196F3', paddingBottom: '10px' }}>📘 {modalContent.title}</h3>
-            <p style={{ lineHeight: '1.6', color: '#333', fontSize: '1.1em', whiteSpace: 'pre-wrap' }}>{modalContent.desc}</p>
-            <div style={{ textAlign: 'right', marginTop: '20px' }}>
-              <button onClick={() => setModalContent(null)} style={{ padding: '10px 20px', backgroundColor: '#333', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>닫기</button>
+        {/* 강의 언어 필터 (DB 데이터 기준) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontWeight: 'bold', color: '#555' }}>🗣️ {ui.filterLang}:</span>
+          <div style={{ display: 'flex', gap: '5px' }}>
+            {[
+              { label: ui.all, val: "ALL" },
+              { label: ui.korean, val: "한국어" },
+              { label: ui.english, val: "영어" },
+              { label: ui.chinese, val: "중국어" }
+            ].map(opt => (
+              <button
+                key={opt.val}
+                onClick={() => setSelectedLang(opt.val)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  backgroundColor: selectedLang === opt.val ? '#1565c0' : '#e0e0e0',
+                  color: selectedLang === opt.val ? 'white' : '#333',
+                  transition: '0.2s'
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. 강의 카드 리스트 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+        {filteredLectures.map(lecture => (
+          <div key={lecture.id} style={{ border: '1px solid #ddd', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', backgroundColor: 'white', position: 'relative', overflow: 'hidden' }}>
+            
+            <div style={{ position: 'absolute', top: '0', right: '0', backgroundColor: '#e3f2fd', color: '#1565c0', padding: '5px 10px', fontSize: '0.8em', borderBottomLeftRadius: '10px', fontWeight: 'bold' }}>
+              {lecture.department}
+            </div>
+
+            {/* 과목명은 번역하지 않고 DB 그대로 출력 */}
+            <h3 style={{ marginTop: '10px', marginBottom: '5px', color: '#333' }}>{lecture.courseName}</h3>
+            <p style={{ margin: 0, color: '#666', fontSize: '0.9em' }}>
+              {lecture.targetGrade}{ui.grade} | {lecture.credits}{ui.credit} | {ui.est} {lecture.estStudents}{ui.students}
+            </p>
+            <p style={{ fontSize: '0.85em', color: '#999', marginTop: '5px' }}>
+              {lecture.description || ui.noDesc}
+            </p>
+
+            <hr style={{ margin: '15px 0', border: 'none', borderTop: '1px solid #eee' }} />
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {Array.from({ length: lecture.sectionInfo?.total || 1 }, (_, i) => i + 1).map(sec => {
+                const applicants = lecture.applicants?.[sec] || [];
+                const isApplied = applicants.includes(myId);
+                const lang = lecture.languageMap?.[sec] || ui.unknown;
+
+                // 필터 적용 (언어 필터가 켜져있으면 해당 안되는 분반 숨김)
+                if (selectedLang !== "ALL" && lang !== selectedLang) return null;
+
+                // 언어 표시 텍스트 변환 (DB값 -> UI 언어)
+                let langDisplay = lang;
+                if(lang === "한국어") langDisplay = ui.korean;
+                if(lang === "영어") langDisplay = ui.english;
+                if(lang === "중국어") langDisplay = ui.chinese;
+
+                return (
+                  <div key={sec} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', padding: '10px', borderRadius: '8px' }}>
+                    <div>
+                      <span style={{ fontWeight: 'bold', marginRight: '5px' }}>{sec}{ui.section}</span>
+                      <span style={{ fontSize: '0.8em', padding: '2px 6px', borderRadius: '4px', backgroundColor: lang === '영어' ? '#e8f5e9' : '#fff3e0', color: lang === '영어' ? '#2e7d32' : '#e65100' }}>
+                        {langDisplay}
+                      </span>
+                      <div style={{ fontSize: '0.8em', color: '#666', marginTop: '2px' }}>
+                        {ui.applicant}: {applicants.length > 0 ? applicants.join(", ") : "-"}
+                      </div>
+                    </div>
+
+                    {isApplied ? (
+                      <button onClick={() => handleCancel(lecture.id, sec)} style={{ backgroundColor: '#ffcdd2', color: '#c62828', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9em' }}>
+                        {ui.cancel}
+                      </button>
+                    ) : (
+                      <button onClick={() => handleApply(lecture.id, sec)} style={{ backgroundColor: '#1565c0', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9em' }}>
+                        {ui.apply}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
+        ))}
+      </div>
+      
+      {filteredLectures.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '50px', color: '#999' }}>
+          {ui.noResult}
         </div>
       )}
     </div>
   );
 };
+
 export default CourseList;
