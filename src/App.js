@@ -10,7 +10,7 @@ function App() {
   // ★ 비밀번호 확인 함수
   const handleAdminAccess = () => {
     const password = window.prompt("관리자 비밀번호를 입력하세요:");
-    if (password === "1230") {
+    if (password === "2161") {
       setCurrentMode('admin');
     } else if (password !== null) {
       alert("비밀번호가 틀렸습니다!");
